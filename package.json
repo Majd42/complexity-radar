@@ -1,0 +1,51 @@
+{
+  "name": "complexity-radar",
+  "version": "0.1.0",
+  "description": "Cyclomatic complexity & tech-debt dashboard. Walks a codebase and generates a self-contained HTML report of complexity hot spots per file and function.",
+  "type": "module",
+  "bin": {
+    "complexity-radar": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cyclomatic-complexity",
+    "code-quality",
+    "tech-debt",
+    "static-analysis",
+    "metrics",
+    "dashboard",
+    "linter",
+    "maintainability",
+    "cli"
+  ],
+  "author": "Majd Shaheen",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Majd42/complexity-radar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Majd42/complexity-radar/issues"
+  },
+  "homepage": "https://github.com/Majd42/complexity-radar#readme",
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

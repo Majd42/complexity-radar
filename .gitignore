@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.tsbuildinfo
+
+# Generated reports
+complexity-report.html
+complexity-report.json
+*.report.html
