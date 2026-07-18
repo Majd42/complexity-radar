@@ -59,6 +59,151 @@ function matchCount(text: string, re: RegExp): number {
 }
 
 /**
+ * Cognitive complexity of a cleaned function body (SonarSource-style heuristic).
+ *
+ * The difference from cyclomatic complexity is that nesting is penalised —
+ * each control structure adds `1 + the current nesting depth` — while a
+ * `switch` counts once instead of once per `case`, and `else`/`elif` add a
+ * flat `1`. Being parser-free the numbers are directional, not exact, but they
+ * track how hard a function is to follow far better than a raw path count.
+ */
+export function cognitiveOf(cleanBody: string, lang: LanguageDef): number {
+  const structural =
+    lang.block === "brace"
+      ? cognitiveBrace(cleanBody, lang)
+      : cognitiveIndent(cleanBody, lang);
+  return structural + logicalSequences(cleanBody, lang.cognitive.logical);
+}
+
+function isWordChar(c: string | undefined): boolean {
+  return c !== undefined && (/[\w$]/.test(c));
+}
+
+/** Cognitive scoring for brace-delimited languages, tracking brace nesting. */
+function cognitiveBrace(body: string, lang: LanguageDef): number {
+  const nestKw = lang.cognitive.nesting;
+  const flatKw = lang.cognitive.flat;
+  let score = 0;
+  let nesting = 0;
+  let parenDepth = 0;
+  // Whether the next `{` opens a nesting scope (a control keyword is pending).
+  let pendingNest = false;
+  const braceNests: boolean[] = [];
+  const n = body.length;
+
+  let i = 0;
+  while (i < n) {
+    const c = body[i]!;
+
+    if (c === "(") { parenDepth++; i++; continue; }
+    if (c === ")") { if (parenDepth > 0) parenDepth--; i++; continue; }
+    if (c === "{") {
+      braceNests.push(pendingNest);
+      if (pendingNest) nesting++;
+      pendingNest = false;
+      i++;
+      continue;
+    }
+    if (c === "}") {
+      if (braceNests.pop()) nesting = Math.max(0, nesting - 1);
+      i++;
+      continue;
+    }
+    // End of a braceless statement drops any pending nesting attachment, so an
+    // `if (x) return;` doesn't wrongly nest an unrelated later block.
+    if (c === ";" && parenDepth === 0) { pendingNest = false; i++; continue; }
+
+    if (c === "?") {
+      const next = body[i + 1];
+      if (next === "?" || next === "." || next === ":") { i += 2; continue; }
+      // Ternary: a conditional, charged like a nested branch.
+      score += 1 + nesting;
+      i++;
+      continue;
+    }
+
+    if (isWordChar(c) && !isWordChar(body[i - 1])) {
+      let j = i + 1;
+      while (j < n && isWordChar(body[j])) j++;
+      const word = body.slice(i, j);
+      if (nestKw.includes(word)) {
+        score += 1 + nesting;
+        pendingNest = true;
+      } else if (flatKw.includes(word)) {
+        score += 1;
+        pendingNest = true; // the else/elif body still nests its contents
+        // Collapse `else if` into a single increment: skip the trailing `if`.
+        let k = j;
+        while (k < n && /\s/.test(body[k]!)) k++;
+        if (body.startsWith("if", k) && !isWordChar(body[k + 2])) j = k + 2;
+      }
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+  return score;
+}
+
+/** Cognitive scoring for indentation-delimited languages (Python). */
+function cognitiveIndent(body: string, lang: LanguageDef): number {
+  const nestKw = lang.cognitive.nesting;
+  const flatKw = lang.cognitive.flat;
+  const stack: number[] = []; // indents of enclosing control blocks
+  let score = 0;
+
+  for (const line of body.split("\n")) {
+    if (line.trim() === "") continue;
+    const ind = indentOf(line);
+    while (stack.length > 0 && ind <= stack[stack.length - 1]!) stack.pop();
+    const nesting = stack.length;
+
+    const first = leadingWord(line);
+    if (!first) continue;
+    if (nestKw.includes(first)) {
+      score += 1 + nesting;
+      stack.push(ind);
+    } else if (flatKw.includes(first)) {
+      score += 1;
+      stack.push(ind);
+    }
+  }
+  return score;
+}
+
+/** The first identifier token on a (possibly indented) line, or "". */
+function leadingWord(line: string): string {
+  const m = /^\s*([A-Za-z_]\w*)/.exec(line);
+  return m ? m[1]! : "";
+}
+
+/**
+ * Count maximal runs of the same binary logical token. `a && b && c` is one
+ * run (+1); `a && b || c` is two (+1 each). A run is broken by an intervening
+ * expression boundary (`;`, braces, parens, newline), so operators in separate
+ * expressions never merge into one run.
+ */
+function logicalSequences(body: string, logical: string[]): number {
+  if (logical.length === 0) return 0;
+  const parts = logical.map((op) =>
+    /^[A-Za-z]/.test(op) ? `\\b${escapeRegExp(op)}\\b` : escapeRegExp(op),
+  );
+  const re = new RegExp(parts.join("|"), "g");
+  let count = 0;
+  let prev: string | null = null;
+  let lastEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    if (/[;{}()\n]/.test(body.slice(lastEnd, m.index))) prev = null;
+    if (m[0] !== prev) count++;
+    prev = m[0];
+    lastEnd = m.index + m[0].length;
+  }
+  return count;
+}
+
+/**
  * Analyse a single source string and return one {@link FunctionMetric} per
  * detected function, plus the file's total non-blank LOC.
  */
@@ -124,6 +269,7 @@ function extractBraceFunctions(
           line: lines.lineAt(match.index),
           endLine: lines.lineAt(end),
           complexity,
+          cognitive: cognitiveOf(body, lang),
           loc: countNonBlankLines(body),
           maxNesting: 0,
           params,
@@ -152,6 +298,7 @@ function extractBraceFunctions(
         line: lines.lineAt(match.index),
         endLine: lines.lineAt(braceClose),
         complexity,
+        cognitive: cognitiveOf(body, lang),
         loc: countNonBlankLines(body),
         maxNesting: braceNesting(body),
         params,
@@ -205,6 +352,7 @@ function extractIndentFunctions(
       line: defLine0 + 1,
       endLine: endLine0 + 1,
       complexity,
+      cognitive: cognitiveOf(body, lang),
       loc: countNonBlankLines(srcLines.slice(defLine0, endLine0 + 1).join("\n")),
       maxNesting: indentNesting(bodyLines, defIndent),
       params,

@@ -11,6 +11,12 @@ export interface FunctionMetric {
   endLine: number;
   /** McCabe cyclomatic complexity (1 + number of decision points). */
   complexity: number;
+  /**
+   * Cognitive complexity (SonarSource-style, heuristic): like cyclomatic, but
+   * nesting is penalised and a `switch` counts once rather than per `case`.
+   * Reads closer to how hard the function actually is to follow.
+   */
+  cognitive: number;
   /** Non-blank lines of code in the body. */
   loc: number;
   /** Maximum block-nesting depth inside the body. */
@@ -39,6 +45,8 @@ export interface FileReport {
   maxComplexity: number;
   /** Mean function complexity (0 when no functions were found). */
   avgComplexity: number;
+  /** Highest single-function cognitive complexity in the file. */
+  maxCognitive: number;
 }
 
 /** A function metric annotated with its originating file, for ranking. */
@@ -71,6 +79,10 @@ export interface ProjectReport {
     totalLoc: number;
     avgComplexity: number;
     maxComplexity: number;
+    /** Mean cognitive complexity across all functions. */
+    avgCognitive: number;
+    /** Highest single-function cognitive complexity in the codebase. */
+    maxCognitive: number;
     /** Worst offenders across the whole codebase, highest complexity first. */
     hotspots: Hotspot[];
     /** Per-language breakdown. */

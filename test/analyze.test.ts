@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyzeSource, complexityOf, severityFor } from "../src/analyze.js";
+import { analyzeSource, cognitiveOf, complexityOf, severityFor } from "../src/analyze.js";
 import { cleanSource } from "../src/clean.js";
 import { LANGUAGES, languageForExtension } from "../src/languages.js";
 
@@ -118,4 +118,71 @@ test("extensions resolve to languages", () => {
 
 test("complexityOf counts a clean body directly", () => {
   assert.equal(complexityOf("{ if (a) {} while (b) {} }", ts), 3);
+});
+
+test("a straight-line function has cognitive complexity 0", () => {
+  const { functions } = analyzeSource(`function add(a, b) { return a + b; }`, ts);
+  assert.equal(functions[0]!.cognitive, 0);
+});
+
+test("cognitive complexity penalises nesting", () => {
+  const src = `function f(x) {
+    if (x > 0) {
+      for (const y of x) {
+        if (y) {}
+      }
+    }
+  }`;
+  // if(+1) + for(+1+1) + if(+1+2) = 6, versus cyclomatic base+3 = 4.
+  const { functions } = analyzeSource(src, ts);
+  assert.equal(functions[0]!.cognitive, 6);
+  assert.equal(functions[0]!.complexity, 4);
+});
+
+test("a switch is one cognitive increment but many cyclomatic ones", () => {
+  const src = `function s(x) {
+    switch (x) {
+      case 1: return 1;
+      case 2: return 2;
+      case 3: return 3;
+    }
+  }`;
+  const { functions } = analyzeSource(src, ts);
+  assert.equal(functions[0]!.cognitive, 1); // one switch
+  assert.equal(functions[0]!.complexity, 4); // base + 3 cases
+});
+
+test("else if collapses to a single cognitive increment", () => {
+  const src = `function g(x) {
+    if (x > 2) {}
+    else if (x > 1) {}
+    else {}
+  }`;
+  // if(+1) + else-if(+1) + else(+1) = 3, none nested.
+  const { functions } = analyzeSource(src, ts);
+  assert.equal(functions[0]!.cognitive, 3);
+});
+
+test("cognitive counts runs of logical operators, not each operator", () => {
+  const { functions } = analyzeSource(`function h(a, b, c, d) { return a && b && c || d; }`, js);
+  // a && b && c is one run (+1), || d is a second run (+1) = 2.
+  assert.equal(functions[0]!.cognitive, 2);
+});
+
+test("python cognitive complexity tracks indentation nesting", () => {
+  const src = [
+    "def f(x):",
+    "    if x:",
+    "        for y in x:",
+    "            if y:",
+    "                pass",
+  ].join("\n");
+  // if(+1) + for(+1+1) + if(+1+2) = 6.
+  const { functions } = analyzeSource(src, py);
+  assert.equal(functions[0]!.cognitive, 6);
+});
+
+test("cognitiveOf scores a clean body directly with nesting weight", () => {
+  // if at depth 0 (+1), while nested at depth 1 (+2) = 3.
+  assert.equal(cognitiveOf("{ if (a) { while (b) {} } }", ts), 3);
 });

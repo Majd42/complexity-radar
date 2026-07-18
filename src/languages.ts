@@ -36,9 +36,36 @@ export interface LanguageDef {
   decisionKeywords: string[];
   /** Operators that each introduce one decision point. */
   decisionOperators: DecisionOperator[];
+  /** Keyword sets driving the cognitive-complexity heuristic. */
+  cognitive: CognitiveDef;
 }
 
 export type DecisionOperator = "&&" | "||" | "??" | "?";
+
+/**
+ * Cognitive-complexity keyword sets (SonarSource-style, heuristic).
+ *
+ * Unlike cyclomatic complexity, cognitive complexity charges more for deeply
+ * nested control flow and counts a `switch` once rather than once per `case`.
+ */
+export interface CognitiveDef {
+  /**
+   * Structures that add `1 + current nesting level` and open a new nesting
+   * level for their body (`if`, loops, `switch`, `catch`, …).
+   */
+  nesting: string[];
+  /**
+   * Structures that add a flat `1` (no nesting penalty) but still nest their
+   * body — the `else` / `elif` family. An `else if` is treated as a single
+   * increment, not two.
+   */
+  flat: string[];
+  /**
+   * Binary logical tokens (`&&`, `||`, or word forms like `and`/`or`). Each
+   * maximal run of the same token adds `1`, with no nesting penalty.
+   */
+  logical: string[];
+}
 
 /** Names that a signature regex may capture but which are never functions. */
 export const RESERVED_NAMES = new Set([
@@ -74,6 +101,11 @@ export const LANGUAGES: LanguageDef[] = [
     ],
     decisionKeywords: ["if", "for", "while", "case", "catch"],
     decisionOperators: ["&&", "||", "??", "?"],
+    cognitive: {
+      nesting: ["if", "for", "while", "switch", "catch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
   },
   {
     id: "javascript",
@@ -90,6 +122,11 @@ export const LANGUAGES: LanguageDef[] = [
     ],
     decisionKeywords: ["if", "for", "while", "case", "catch"],
     decisionOperators: ["&&", "||", "??", "?"],
+    cognitive: {
+      nesting: ["if", "for", "while", "switch", "catch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
   },
   {
     id: "python",
@@ -102,6 +139,11 @@ export const LANGUAGES: LanguageDef[] = [
     signaturePatterns: [/\bdef\s+([A-Za-z_]\w*)\s*\(/g],
     decisionKeywords: ["if", "elif", "for", "while", "except", "case", "and", "or"],
     decisionOperators: [],
+    cognitive: {
+      nesting: ["if", "for", "while", "except"],
+      flat: ["elif", "else"],
+      logical: ["and", "or"],
+    },
   },
   {
     id: "go",
@@ -115,6 +157,11 @@ export const LANGUAGES: LanguageDef[] = [
     signaturePatterns: [/\bfunc\s*(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(/g],
     decisionKeywords: ["if", "for", "case"],
     decisionOperators: ["&&", "||"],
+    cognitive: {
+      nesting: ["if", "for", "switch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
   },
   {
     id: "java",
@@ -130,6 +177,11 @@ export const LANGUAGES: LanguageDef[] = [
     ],
     decisionKeywords: ["if", "for", "while", "case", "catch"],
     decisionOperators: ["&&", "||", "?"],
+    cognitive: {
+      nesting: ["if", "for", "while", "switch", "catch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
   },
   {
     id: "csharp",
@@ -144,6 +196,11 @@ export const LANGUAGES: LanguageDef[] = [
     ],
     decisionKeywords: ["if", "for", "foreach", "while", "case", "catch"],
     decisionOperators: ["&&", "||", "??", "?"],
+    cognitive: {
+      nesting: ["if", "for", "foreach", "while", "switch", "catch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
   },
 ];
 

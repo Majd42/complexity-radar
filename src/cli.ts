@@ -137,6 +137,7 @@ function printSummary(report: ProjectReport, started: number): void {
   out.write(`\nComplexity Radar\n`);
   out.write(`  Scanned ${s.fileCount} file(s), ${s.functionCount} function(s), ${fmt(s.totalLoc)} LOC in ${ms}ms\n`);
   out.write(`  Avg complexity ${s.avgComplexity.toFixed(1)} · Max ${s.maxComplexity}\n`);
+  out.write(`  Avg cognitive ${s.avgCognitive.toFixed(1)} · Max ${s.maxCognitive}\n`);
   out.write(
     `  Severity: ${paint("low", s.severity.low)} low · ` +
     `${paint("moderate", s.severity.moderate)} moderate · ` +

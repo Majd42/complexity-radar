@@ -11,7 +11,7 @@ import type {
 } from "./types.js";
 
 export * from "./types.js";
-export { analyzeSource, complexityOf, severityFor, SEVERITY_THRESHOLDS } from "./analyze.js";
+export { analyzeSource, complexityOf, cognitiveOf, severityFor, SEVERITY_THRESHOLDS } from "./analyze.js";
 export { renderHtml } from "./report.js";
 export { LANGUAGES } from "./languages.js";
 
@@ -49,6 +49,7 @@ export function analyzeProject(
       totalComplexity,
       maxComplexity: complexities.length ? Math.max(...complexities) : 0,
       avgComplexity: functions.length ? totalComplexity / functions.length : 0,
+      maxCognitive: functions.length ? Math.max(...functions.map((f) => f.cognitive)) : 0,
     });
   }
 
@@ -73,6 +74,8 @@ function buildSummary(
   let totalLoc = 0;
   let totalComplexity = 0;
   let maxComplexity = 0;
+  let totalCognitive = 0;
+  let maxCognitive = 0;
   let overThreshold = 0;
 
   const labelFor = (id: string) => LANGUAGE_LABELS[id] ?? id;
@@ -87,6 +90,8 @@ function buildSummary(
       functionCount++;
       totalComplexity += fn.complexity;
       maxComplexity = Math.max(maxComplexity, fn.complexity);
+      totalCognitive += fn.cognitive;
+      maxCognitive = Math.max(maxCognitive, fn.cognitive);
       severity[fn.severity]++;
       if (threshold !== null && fn.complexity > threshold) overThreshold++;
 
@@ -118,6 +123,8 @@ function buildSummary(
     totalLoc,
     avgComplexity: functionCount ? totalComplexity / functionCount : 0,
     maxComplexity,
+    avgCognitive: functionCount ? totalCognitive / functionCount : 0,
+    maxCognitive,
     hotspots: hotspots.slice(0, top),
     byLanguage,
     severity,

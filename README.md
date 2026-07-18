@@ -1,9 +1,9 @@
 # Complexity Radar ◎
 
-A zero-dependency **cyclomatic complexity & tech-debt dashboard**. Point it at a
-codebase and it walks the tree, scores every function, and writes a single
-self-contained HTML report highlighting the complexity hot spots per file and
-method.
+A zero-dependency **complexity & tech-debt dashboard**. Point it at a codebase
+and it walks the tree, scores every function for both **cyclomatic** and
+**cognitive** complexity, and writes a single self-contained HTML report
+highlighting the hot spots per file and method.
 
 Supports **JavaScript, TypeScript, Python, Go, Java, and C#** out of the box, and
 runs anywhere Node ≥ 18 does — no compiler toolchains, no language servers.
@@ -13,11 +13,20 @@ runs anywhere Node ≥ 18 does — no compiler toolchains, no language servers.
 
 ## Why
 
-Cyclomatic complexity (McCabe, 1976) counts the number of independent paths
+**Cyclomatic complexity** (McCabe, 1976) counts the number of independent paths
 through a function — essentially `1 + the number of decision points` (`if`,
 `for`, `while`, `case`, `catch`, `&&`, `||`, ternaries, …). High numbers
-correlate with code that is hard to test, hard to read, and bug-prone.
-Complexity Radar surfaces the worst offenders so you know where to aim a refactor.
+correlate with code that is hard to test and bug-prone.
+
+**Cognitive complexity** (SonarSource) measures how hard the code is to *follow*.
+It builds on the same signals but **penalises nesting** — a branch three levels
+deep costs more than a flat one — counts a `switch` once instead of once per
+`case`, and collapses `a && b && c` into a single increment. The two metrics
+often disagree, and that disagreement is informative: a flat function stuffed
+with boolean operators can have a high cyclomatic score yet be easy to read,
+while a modestly-branchy but deeply-nested function is the real refactor target.
+
+Complexity Radar reports both side by side so you know where to aim a refactor.
 
 ## Install
 
@@ -75,9 +84,11 @@ dot-directories, oversized files, and minified files are skipped automatically.
 The generated HTML is fully self-contained (inline CSS/JS, no network requests),
 theme-aware (light/dark), and includes:
 
-- **Summary cards** — files, functions, lines of code, average & max complexity.
+- **Summary cards** — files, functions, lines of code, average & max complexity,
+  and max cognitive complexity.
 - **Severity distribution** — how many functions fall into each risk band.
-- **Hot spots** — the worst functions, sortable and filterable, with file/line links.
+- **Hot spots** — the worst functions, sortable and filterable, with file/line
+  links and both complexity metrics side by side.
 - **By language** — a per-language rollup.
 - **Files** — collapsible per-file breakdowns of every function.
 
@@ -90,6 +101,9 @@ theme-aware (light/dark), and includes:
 | 🟠 High | 21–40 | Hard to test, refactor candidate |
 | 🔴 Very high | ≥ 41 | Unmaintainable, split it up |
 
+The same bands colour the cognitive-complexity badges. Cognitive scores tend to
+run a little lower than cyclomatic on flat code and higher on deeply-nested code.
+
 ## Programmatic API
 
 ```ts
@@ -98,9 +112,9 @@ import { writeFileSync } from "node:fs";
 
 const report = analyzeProject(["src"], process.cwd(), { threshold: 15 });
 
-console.log(report.summary.avgComplexity);
+console.log(report.summary.avgComplexity, report.summary.avgCognitive);
 for (const hot of report.summary.hotspots) {
-  console.log(`${hot.complexity}\t${hot.relPath}:${hot.line} ${hot.name}`);
+  console.log(`${hot.complexity}\t${hot.cognitive}\t${hot.relPath}:${hot.line} ${hot.name}`);
 }
 
 writeFileSync("report.html", renderHtml(report));
@@ -113,8 +127,9 @@ Complexity Radar is intentionally **parser-free**. For each file it:
 1. Blanks out comments and string literals while preserving character offsets.
 2. Finds function signatures with per-language regexes.
 3. Isolates each body by bracket-matching (`{…}`) or, for Python, by indentation.
-4. Counts decision points in the body to produce the McCabe score, plus lines of
-   code, nesting depth, and parameter count.
+4. Counts decision points in the body to produce the McCabe score, walks the
+   body tracking nesting (via braces or indentation) for the cognitive score,
+   and records lines of code, nesting depth, and parameter count.
 
 This keeps the tool a single tiny package that works across many languages, but
 it is a **heuristic**, not a compiler. Detection is reliable for JS/TS, Python,
