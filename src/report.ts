@@ -1,5 +1,5 @@
 import { SEVERITY_THRESHOLDS } from "./analyze.js";
-import type { FileReport, ProjectReport, Severity } from "./types.js";
+import type { FileReport, Hotspot, ProjectReport, Severity } from "./types.js";
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   low: "Low",
@@ -40,6 +40,7 @@ export function renderHtml(report: ProjectReport): string {
     ${card("Avg complexity", summary.avgComplexity.toFixed(1))}
     ${card("Max complexity", fmt(summary.maxComplexity), severityFor(summary.maxComplexity))}
     ${card("Max cognitive", fmt(summary.maxCognitive), severityFor(summary.maxCognitive))}
+    ${summary.churn ? card("Max risk", fmt(summary.churn.hotspots[0]?.risk ?? 0)) : ""}
     ${thresholdCard(summary.threshold, summary.overThreshold)}
   </section>
 
@@ -53,6 +54,8 @@ export function renderHtml(report: ProjectReport): string {
       ${legendItem("veryHigh", `≥ ${SEVERITY_THRESHOLDS.veryHigh}`)}
     </p>
   </section>
+
+  ${riskPanel(report)}
 
   <section class="panel">
     <h2>Hot spots <span class="subtle">worst ${summary.hotspots.length} functions</span></h2>
@@ -144,6 +147,53 @@ function hotspotTable(report: ProjectReport): string {
   </table></div>`;
 }
 
+function riskPanel(report: ProjectReport): string {
+  const churn = report.summary.churn;
+  if (!churn) return "";
+  const window = churn.since
+    ? `since ${escapeHtml(churn.since)}`
+    : "full history";
+  const body =
+    churn.hotspots.length === 0
+      ? '<p class="subtle">No churn recorded for the analysed files.</p>'
+      : riskTable(churn.hotspots);
+  return `<section class="panel">
+    <h2>Risk hot spots
+      <span class="subtle">complexity × git churn · ${window}</span>
+    </h2>
+    <p class="subtle risk-note">Functions that are both complex and frequently
+    changed — the highest-payoff refactor targets. Churn is the number of commits
+    touching the file in the window.</p>
+    ${body}
+  </section>`;
+}
+
+function riskTable(hotspots: Hotspot[]): string {
+  const rows = hotspots
+    .map(
+      (h) => `<tr>
+      <td data-sort="${escapeAttr(h.name)}"><code>${escapeHtml(h.name)}</code></td>
+      <td data-sort="${escapeAttr(h.relPath)}" class="path"><span title="${escapeHtml(h.relPath)}">${escapeHtml(h.relPath)}</span><span class="subtle">:${h.line}</span></td>
+      <td data-type="num" data-sort="${h.commits ?? 0}">${h.commits ?? 0}</td>
+      <td data-type="num" data-sort="${h.complexity}">${badge(h.complexity, h.severity)}</td>
+      <td data-type="num" data-sort="${h.cognitive}">${badge(h.cognitive, severityFor(h.cognitive))}</td>
+      <td data-type="num" data-sort="${h.risk ?? 0}"><strong>${fmt(h.risk ?? 0)}</strong></td>
+    </tr>`,
+    )
+    .join("\n");
+  return `<div class="table-wrap"><table class="sortable">
+    <thead><tr>
+      <th data-key>Function</th>
+      <th data-key>File</th>
+      <th data-key data-type="num" class="num" title="Commits touching this file in the window">Churn</th>
+      <th data-key data-type="num" class="num">Complexity</th>
+      <th data-key data-type="num" class="num">Cognitive</th>
+      <th data-key data-type="num" class="num" aria-sort="descending" title="Complexity × churn">Risk</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
 function languageTable(report: ProjectReport): string {
   const rows = report.summary.byLanguage
     .map(
@@ -186,7 +236,7 @@ function fileBlock(file: FileReport): string {
     <summary>
       <span class="fname">${escapeHtml(file.relPath)}</span>
       <span class="fmeta">
-        <span class="subtle">${file.functions.length} fn · ${file.loc} LOC</span>
+        <span class="subtle">${file.functions.length} fn · ${file.loc} LOC${file.commits !== null ? ` · ${file.commits} commit${file.commits === 1 ? "" : "s"}` : ""}</span>
         ${badge(worst, severityFor(worst))}
       </span>
     </summary>
@@ -263,6 +313,7 @@ main{max-width:1100px;margin:0 auto;padding:24px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:20px}
 .panel h2{margin:0 0 14px;font-size:15px}
 .subtle{color:var(--muted);font-weight:400;font-size:12.5px}
+.risk-note{margin:-6px 0 14px;max-width:70ch}
 .bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--code)}
 .bar.empty{opacity:.4}
 .seg-low{background:var(--low)}.seg-moderate{background:var(--moderate)}

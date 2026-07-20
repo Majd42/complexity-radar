@@ -47,12 +47,38 @@ export interface FileReport {
   avgComplexity: number;
   /** Highest single-function cognitive complexity in the file. */
   maxCognitive: number;
+  /**
+   * Number of git commits that touched this file within the churn window, or
+   * `null` when churn analysis was not run (not a git repo, or disabled).
+   */
+  commits: number | null;
 }
 
 /** A function metric annotated with its originating file, for ranking. */
 export interface Hotspot extends FunctionMetric {
   relPath: string;
   language: string;
+  /** Commits touching the originating file, or `null` when churn is unavailable. */
+  commits: number | null;
+  /**
+   * Churn-weighted risk: `complexity × commits`. High risk means a function is
+   * both complex and frequently changed — the real refactor target. `null` when
+   * churn is unavailable.
+   */
+  risk: number | null;
+}
+
+/** Git-churn rollup, present only when churn analysis ran. */
+export interface ChurnSummary {
+  /** The `--since` window used (e.g. "6 months ago"), or `null` for full history. */
+  since: string | null;
+  /** Total commits observed across all analysed files in the window. */
+  totalCommits: number;
+  /**
+   * Functions ranked by {@link Hotspot.risk} (complexity × churn), highest
+   * first. The natural "where do I refactor first?" list.
+   */
+  hotspots: Hotspot[];
 }
 
 /** Per-language rollup. */
@@ -93,6 +119,8 @@ export interface ProjectReport {
     overThreshold: number;
     /** The threshold used, if any. */
     threshold: number | null;
+    /** Git-churn rollup, or `null` when churn analysis did not run. */
+    churn: ChurnSummary | null;
   };
 }
 
@@ -106,4 +134,16 @@ export interface AnalyzeOptions {
   threshold?: number | null;
   /** Skip files larger than this many bytes (default 2 MiB). */
   maxFileSize?: number;
+  /**
+   * Compute git churn (commits per file) and a `complexity × churn` risk
+   * ranking. Defaults to `true`, which auto-enables when the analysis root is
+   * inside a git repository; set `false` to skip git entirely.
+   */
+  churn?: boolean;
+  /**
+   * Git date expression bounding the churn window (e.g. `"6 months ago"`,
+   * `"2024-01-01"`). `null`/undefined means the full history. Ignored when
+   * churn is disabled.
+   */
+  since?: string | null;
 }

@@ -28,6 +28,15 @@ while a modestly-branchy but deeply-nested function is the real refactor target.
 
 Complexity Radar reports both side by side so you know where to aim a refactor.
 
+**Git churn × complexity.** A complex function nobody touches is rarely worth
+the risk of a refactor; a complex function that changes every week is where bugs
+actually breed. When run inside a git repository, Complexity Radar counts how
+many commits have touched each file and ranks functions by a **risk score of
+`complexity × churn`** — the classic hotspot signal. This surfaces the code that
+is both hard to change *and* changed often, which is where refactoring pays off
+first. Churn is on by default; use `--no-churn` to skip it or `--since` to bound
+the window (e.g. only the last few months of activity).
+
 ## Install
 
 ```bash
@@ -73,6 +82,8 @@ complexity-radar . --ignore "**/*.test.ts,**/generated/**" --json report.json
 | `-t, --threshold <n>` | Exit with code `1` if any function exceeds complexity `n` (CI gate) |
 | `--top <n>` | Number of hot spots to include (default `25`) |
 | `-i, --ignore <glob>` | Extra ignore glob, repeatable or comma-separated |
+| `--since <when>` | Git date bounding the churn window (e.g. `"6 months ago"`, `2024-01-01`) |
+| `--no-churn` | Skip git churn analysis (the `complexity × churn` risk ranking) |
 | `-q, --quiet` | Only print the summary line |
 | `-h, --help` / `-v, --version` | Help / version |
 
@@ -85,8 +96,10 @@ The generated HTML is fully self-contained (inline CSS/JS, no network requests),
 theme-aware (light/dark), and includes:
 
 - **Summary cards** — files, functions, lines of code, average & max complexity,
-  and max cognitive complexity.
+  max cognitive complexity, and (in a git repo) the top risk score.
 - **Severity distribution** — how many functions fall into each risk band.
+- **Risk hot spots** — when run in a git repo, functions ranked by
+  `complexity × churn`: the ones both complex and frequently changed.
 - **Hot spots** — the worst functions, sortable and filterable, with file/line
   links and both complexity metrics side by side.
 - **By language** — a per-language rollup.
@@ -117,6 +130,11 @@ for (const hot of report.summary.hotspots) {
   console.log(`${hot.complexity}\t${hot.cognitive}\t${hot.relPath}:${hot.line} ${hot.name}`);
 }
 
+// When run inside a git repo, `summary.churn` ranks functions by risk = complexity × churn.
+for (const hot of report.summary.churn?.hotspots ?? []) {
+  console.log(`risk ${hot.risk}\t${hot.commits} commits\t${hot.relPath}:${hot.line} ${hot.name}`);
+}
+
 writeFileSync("report.html", renderHtml(report));
 ```
 
@@ -130,6 +148,12 @@ Complexity Radar is intentionally **parser-free**. For each file it:
 4. Counts decision points in the body to produce the McCabe score, walks the
    body tracking nesting (via braces or indentation) for the cognitive score,
    and records lines of code, nesting depth, and parameter count.
+
+Churn is measured separately by shelling out to `git log --name-only` and
+counting the commits that touched each file (bounded by `--since` when given);
+outside a git repo, or with `--no-churn`, that step is skipped and the risk
+ranking is simply omitted. Churn is per **file**, so every function in a file
+inherits that file's change frequency.
 
 This keeps the tool a single tiny package that works across many languages, but
 it is a **heuristic**, not a compiler. Detection is reliable for JS/TS, Python,

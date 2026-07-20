@@ -13,6 +13,8 @@ interface CliOptions {
   top: number;
   ignore: string[];
   quiet: boolean;
+  churn: boolean;
+  since: string | null;
 }
 
 const HELP = `complexity-radar — cyclomatic complexity & tech-debt dashboard
@@ -29,6 +31,8 @@ Options:
   -t, --threshold <n>   Exit with code 1 if any function exceeds complexity n
       --top <n>         Number of hot spots to include (default: 25)
   -i, --ignore <glob>   Extra ignore glob (repeatable, comma-separated)
+      --since <when>    Git date bounding the churn window (e.g. "6 months ago")
+      --no-churn        Skip git churn analysis (complexity × change frequency)
   -q, --quiet           Only print the summary line
   -h, --help            Show this help
   -v, --version         Show version
@@ -37,6 +41,7 @@ Examples:
   complexity-radar
   complexity-radar src -o report.html --top 40
   complexity-radar . --threshold 15 --ignore "**/*.test.ts,**/generated/**"
+  complexity-radar . --since "6 months ago"      # recent-churn risk ranking
 `;
 
 function parseArgs(argv: string[]): CliOptions | { help: true } | { version: true } {
@@ -48,6 +53,8 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
     top: 25,
     ignore: [],
     quiet: false,
+    churn: true,
+    since: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -67,6 +74,8 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
       case "-i": case "--ignore":
         opts.ignore.push(...next().split(",").map((s) => s.trim()).filter(Boolean));
         break;
+      case "--since": opts.since = next(); break;
+      case "--no-churn": opts.churn = false; break;
       case "-q": case "--quiet": opts.quiet = true; break;
       default:
         if (arg.startsWith("-")) fail(`Unknown option: ${arg}`);
@@ -110,6 +119,8 @@ function main(): void {
     ignore: opts.ignore,
     top: opts.top,
     threshold: opts.threshold,
+    churn: opts.churn,
+    since: opts.since,
   });
 
   const outPath = resolve(process.cwd(), opts.output);
@@ -150,6 +161,18 @@ function printSummary(report: ProjectReport, started: number): void {
     for (const h of s.hotspots.slice(0, 10)) {
       out.write(
         `    ${paint(h.severity, String(h.complexity).padStart(3))}  ` +
+        `${h.relPath}:${h.line} ${dim(h.name)}\n`,
+      );
+    }
+  }
+
+  if (s.churn && s.churn.hotspots.length > 0) {
+    const window = s.churn.since ? `since ${s.churn.since}` : "full history";
+    out.write(`\n  Top risk (complexity × churn, ${window}):\n`);
+    for (const h of s.churn.hotspots.slice(0, 10)) {
+      out.write(
+        `    ${paint(h.severity, String(h.risk ?? 0).padStart(4))}  ` +
+        `${dim(`c${h.complexity}×${h.commits}`)}  ` +
         `${h.relPath}:${h.line} ${dim(h.name)}\n`,
       );
     }
