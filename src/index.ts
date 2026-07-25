@@ -1,8 +1,10 @@
 import { resolve } from "node:path";
 import { analyzeSource } from "./analyze.js";
+import { type Churn, collectChurn } from "./git.js";
 import { walk } from "./walk.js";
 import type {
   AnalyzeOptions,
+  ChurnSummary,
   FileReport,
   Hotspot,
   LanguageSummary,
@@ -13,7 +15,9 @@ import type {
 export * from "./types.js";
 export { analyzeSource, complexityOf, cognitiveOf, severityFor, SEVERITY_THRESHOLDS } from "./analyze.js";
 export { renderHtml } from "./report.js";
+export { renderMarkdown } from "./markdown.js";
 export { LANGUAGES } from "./languages.js";
+export { collectChurn, isGitRepo } from "./git.js";
 
 /**
  * Analyse one or more paths and produce a complete {@link ProjectReport}.
@@ -29,6 +33,11 @@ export function analyzeProject(
   const absRoot = resolve(root);
   const top = options.top ?? 25;
   const threshold = options.threshold ?? null;
+
+  // Churn defaults on and auto-detects a repo; collectChurn returns null when
+  // `absRoot` isn't in one, so a plain directory scan just skips git silently.
+  const churn: Churn | null =
+    options.churn === false ? null : collectChurn(absRoot, options.since ?? null);
 
   const discovered = walk(paths.length ? paths : ["."], absRoot, {
     ignore: options.ignore,
@@ -50,6 +59,7 @@ export function analyzeProject(
       maxComplexity: complexities.length ? Math.max(...complexities) : 0,
       avgComplexity: functions.length ? totalComplexity / functions.length : 0,
       maxCognitive: functions.length ? Math.max(...functions.map((f) => f.cognitive)) : 0,
+      commits: churn ? churn.get(file.absPath) : null,
     });
   }
 
@@ -57,7 +67,7 @@ export function analyzeProject(
     generatedAt: new Date().toISOString(),
     root: absRoot,
     files,
-    summary: buildSummary(files, top, threshold),
+    summary: buildSummary(files, top, threshold, churn),
   };
 }
 
@@ -65,6 +75,7 @@ function buildSummary(
   files: FileReport[],
   top: number,
   threshold: number | null,
+  churn: Churn | null,
 ): ProjectReport["summary"] {
   const severity: Record<Severity, number> = { low: 0, moderate: 0, high: 0, veryHigh: 0 };
   const byLang = new Map<string, { files: number; functions: number; loc: number; total: number; max: number }>();
@@ -99,10 +110,14 @@ function buildSummary(
       lang.total += fn.complexity;
       lang.max = Math.max(lang.max, fn.complexity);
 
-      hotspots.push({ ...fn, relPath: file.relPath, language: file.language });
+      const commits = file.commits;
+      const risk = commits === null ? null : fn.complexity * commits;
+      hotspots.push({ ...fn, relPath: file.relPath, language: file.language, commits, risk });
     }
     byLang.set(file.language, lang);
   }
+
+  const churnSummary = churn ? buildChurnSummary(hotspots, churn, top) : null;
 
   hotspots.sort((a, b) => b.complexity - a.complexity || b.loc - a.loc);
 
@@ -130,7 +145,21 @@ function buildSummary(
     severity,
     overThreshold,
     threshold,
+    churn: churnSummary,
   };
+}
+
+/**
+ * Rank hotspots by `complexity × churn` risk. Ties break on raw complexity so a
+ * complex function edges out an equally-churned simpler one. Functions in files
+ * with no commits (risk 0) are dropped — they carry no churn signal.
+ */
+function buildChurnSummary(hotspots: Hotspot[], churn: Churn, top: number): ChurnSummary {
+  const ranked = hotspots
+    .filter((h) => (h.risk ?? 0) > 0)
+    .sort((a, b) => (b.risk ?? 0) - (a.risk ?? 0) || b.complexity - a.complexity)
+    .slice(0, top);
+  return { since: churn.since, totalCommits: churn.total, hotspots: ranked };
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
