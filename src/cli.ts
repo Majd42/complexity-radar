@@ -3,12 +3,14 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { analyzeProject } from "./index.js";
 import { renderHtml } from "./report.js";
+import { renderMarkdown } from "./markdown.js";
 import type { ProjectReport, Severity } from "./types.js";
 
 interface CliOptions {
   paths: string[];
   output: string;
   json: string | null;
+  markdown: string | null;
   threshold: number | null;
   top: number;
   ignore: string[];
@@ -28,6 +30,7 @@ Arguments:
 Options:
   -o, --output <file>   HTML report path (default: complexity-report.html)
   -j, --json <file>     Also write the raw report as JSON
+  -m, --markdown <file> Also write a Markdown summary (great for PR/CI comments)
   -t, --threshold <n>   Exit with code 1 if any function exceeds complexity n
       --top <n>         Number of hot spots to include (default: 25)
   -i, --ignore <glob>   Extra ignore glob (repeatable, comma-separated)
@@ -42,6 +45,7 @@ Examples:
   complexity-radar src -o report.html --top 40
   complexity-radar . --threshold 15 --ignore "**/*.test.ts,**/generated/**"
   complexity-radar . --since "6 months ago"      # recent-churn risk ranking
+  complexity-radar src -m summary.md             # Markdown for a PR comment
 `;
 
 function parseArgs(argv: string[]): CliOptions | { help: true } | { version: true } {
@@ -49,6 +53,7 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
     paths: [],
     output: "complexity-report.html",
     json: null,
+    markdown: null,
     threshold: null,
     top: 25,
     ignore: [],
@@ -69,6 +74,7 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
       case "-v": case "--version": return { version: true };
       case "-o": case "--output": opts.output = next(); break;
       case "-j": case "--json": opts.json = next(); break;
+      case "-m": case "--markdown": opts.markdown = next(); break;
       case "-t": case "--threshold": opts.threshold = parseIntOrFail(next(), arg); break;
       case "--top": opts.top = parseIntOrFail(next(), arg); break;
       case "-i": case "--ignore":
@@ -127,6 +133,9 @@ function main(): void {
   writeFileSync(outPath, renderHtml(report), "utf8");
   if (opts.json) {
     writeFileSync(resolve(process.cwd(), opts.json), JSON.stringify(report, null, 2), "utf8");
+  }
+  if (opts.markdown) {
+    writeFileSync(resolve(process.cwd(), opts.markdown), renderMarkdown(report), "utf8");
   }
 
   if (!opts.quiet) printSummary(report, started);

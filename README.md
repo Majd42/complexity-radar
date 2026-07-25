@@ -71,6 +71,9 @@ complexity-radar . --threshold 15
 
 # Ignore extra paths and also emit raw JSON
 complexity-radar . --ignore "**/*.test.ts,**/generated/**" --json report.json
+
+# Write a Markdown summary to drop into a pull request or CI comment
+complexity-radar src --markdown summary.md
 ```
 
 ### Options
@@ -79,6 +82,7 @@ complexity-radar . --ignore "**/*.test.ts,**/generated/**" --json report.json
 | --- | --- |
 | `-o, --output <file>` | HTML report path (default `complexity-report.html`) |
 | `-j, --json <file>` | Also write the raw report as JSON |
+| `-m, --markdown <file>` | Also write a Markdown summary — ideal for PR/CI comments |
 | `-t, --threshold <n>` | Exit with code `1` if any function exceeds complexity `n` (CI gate) |
 | `--top <n>` | Number of hot spots to include (default `25`) |
 | `-i, --ignore <glob>` | Extra ignore glob, repeatable or comma-separated |
@@ -104,6 +108,11 @@ theme-aware (light/dark), and includes:
   links and both complexity metrics side by side.
 - **By language** — a per-language rollup.
 - **Files** — collapsible per-file breakdowns of every function.
+
+Pass `--markdown <file>` to also emit a plain-text Markdown summary (headline
+metrics, severity, hot spots, and the risk ranking) — the format you paste
+straight into a pull request or CI comment. Combine it with `--threshold` to
+gate CI and post the results in one run.
 
 ### Severity bands
 

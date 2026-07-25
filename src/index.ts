@@ -15,6 +15,7 @@ import type {
 export * from "./types.js";
 export { analyzeSource, complexityOf, cognitiveOf, severityFor, SEVERITY_THRESHOLDS } from "./analyze.js";
 export { renderHtml } from "./report.js";
+export { renderMarkdown } from "./markdown.js";
 export { LANGUAGES } from "./languages.js";
 export { collectChurn, isGitRepo } from "./git.js";
 
