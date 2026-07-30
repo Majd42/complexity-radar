@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { analyzeProject } from "./index.js";
 import { renderHtml } from "./report.js";
 import { renderMarkdown } from "./markdown.js";
@@ -105,7 +106,17 @@ function fail(message: string): never {
 }
 
 function getVersion(): string {
-  return "0.1.0";
+  // Read from the packaged package.json so `--version` never drifts out of sync
+  // with the published release. cli.js lives in dist/, so package.json is one
+  // level up.
+  try {
+    const pkgPath = fileURLToPath(new URL("../package.json", import.meta.url));
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    if (typeof pkg.version === "string") return pkg.version;
+  } catch {
+    // Fall through to the unknown marker below.
+  }
+  return "0.0.0-unknown";
 }
 
 function main(): void {
