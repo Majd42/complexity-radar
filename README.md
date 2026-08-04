@@ -5,8 +5,9 @@ and it walks the tree, scores every function for both **cyclomatic** and
 **cognitive** complexity, and writes a single self-contained HTML report
 highlighting the hot spots per file and method.
 
-Supports **JavaScript, TypeScript, Python, Go, Java, and C#** out of the box, and
-runs anywhere Node ≥ 18 does — no compiler toolchains, no language servers.
+Supports **JavaScript, TypeScript, Python, Go, Java, C#, and Rust** out of the
+box, and runs anywhere Node ≥ 18 does — no compiler toolchains, no language
+servers.
 
 ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -166,7 +167,10 @@ inherits that file's change frequency.
 
 This keeps the tool a single tiny package that works across many languages, but
 it is a **heuristic**, not a compiler. Detection is reliable for JS/TS, Python,
-and Go; Java and C# extraction is best-effort. Treat the scores as directional
+Go, and Rust; Java and C# extraction is best-effort. For Rust, `match` arms are
+counted as branches, the `?` try operator is (correctly) not, and lifetimes
+(`'a`) and loop labels (`'outer:`) are distinguished from char literals. Treat
+the scores as directional
 signals for where to look, not as exact ground truth. Expression-bodied arrows
 are supported; deeply unusual constructs (e.g. object-literal TS return types)
 may occasionally be mis-attributed.
