@@ -43,6 +43,20 @@ export function cleanSource(src: string, lang: LanguageDef): string {
       continue;
     }
 
+    // Rust single quotes: a `'` starts a char literal only when it closes as
+    // one (`'a'`, `'\n'`); otherwise it's a lifetime (`'a`) or a loop label
+    // (`'outer:`) and must be left alone, or we'd blank half the file.
+    if (lang.lifetimeQuotes && src[i] === "'") {
+      if (isCharLiteral(src, i)) {
+        const end = charLiteralEnd(src, i);
+        blank(i, end);
+        i = end;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
     // String / char literals. Longer delimiters (""" ''') are tried first
     // because the language table lists them first.
     const delim = lang.strings.find((d) => src.startsWith(d, i));
@@ -69,6 +83,29 @@ export function cleanSource(src: string, lang: LanguageDef): string {
   }
 
   return out.join("");
+}
+
+/**
+ * Does the `'` at `i` begin a Rust char literal (as opposed to a lifetime or
+ * loop label)? A char literal is `'\<esc>...'` or a single char followed by a
+ * closing `'`; a lifetime like `'a` or `'static` has an identifier that is not
+ * immediately closed.
+ */
+function isCharLiteral(src: string, i: number): boolean {
+  if (src[i + 1] === "\\") return true; // '\n', '\'', '\u{1F600}', …
+  return src[i + 2] === "'"; // 'a', '{', ' ' — a one-char literal
+}
+
+/** End offset (exclusive) of the char literal starting at `i`. */
+function charLiteralEnd(src: string, i: number): number {
+  const n = src.length;
+  let j = i + 1;
+  if (src[j] === "\\") {
+    j++; // skip the escape's backslash
+    while (j < n && src[j] !== "'") j++; // …then run to the closing quote
+    return Math.min(j + 1, n);
+  }
+  return Math.min(i + 3, n); // 'x' — three chars
 }
 
 /** Maps character offsets in a source string to 1-based line numbers. */

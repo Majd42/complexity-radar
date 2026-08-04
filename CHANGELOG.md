@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rust support** (`.rs`). Detects free functions and `impl`/trait methods,
+  including generics and lifetimes. `match` arms are counted as branches, the
+  `?` try operator is not treated as a decision, and lifetimes (`'a`) and loop
+  labels (`'outer:`) are distinguished from char literals so they don't corrupt
+  the scan.
 - **Cognitive complexity** metric (SonarSource) reported alongside cyclomatic
   complexity, so a flat-but-boolean-heavy function can be told apart from a
   genuinely tangled, deeply-nested one.

@@ -24,6 +24,12 @@ export interface LanguageDef {
   blockComment: [string, string][];
   /** String / char delimiters. List longer ones first (e.g. `"""` before `"`). */
   strings: string[];
+  /**
+   * Single quotes may denote a lifetime/label rather than a char literal
+   * (Rust: `'a`, `'static`, `'outer: loop`). When set, a `'` is only treated as
+   * a string/char delimiter when it actually closes as a char literal.
+   */
+  lifetimeQuotes?: boolean;
   /** How function bodies are delimited. */
   block: BlockStyle;
   /**
@@ -40,7 +46,7 @@ export interface LanguageDef {
   cognitive: CognitiveDef;
 }
 
-export type DecisionOperator = "&&" | "||" | "??" | "?";
+export type DecisionOperator = "&&" | "||" | "??" | "?" | "=>";
 
 /**
  * Cognitive-complexity keyword sets (SonarSource-style, heuristic).
@@ -77,6 +83,8 @@ export const RESERVED_NAMES = new Set([
   "private", "protected", "static", "async", "get", "set", "readonly",
   "foreach", "func", "def", "elif", "except", "and", "or", "not", "using",
   "namespace", "struct", "interface", "enum", "package", "select",
+  "fn", "impl", "trait", "mut", "dyn", "move", "unsafe", "where", "loop",
+  "match", "pub", "crate", "mod", "ref", "type",
 ]);
 
 const C_LINE = ["//"];
@@ -198,6 +206,30 @@ export const LANGUAGES: LanguageDef[] = [
     decisionOperators: ["&&", "||", "??", "?"],
     cognitive: {
       nesting: ["if", "for", "foreach", "while", "switch", "catch"],
+      flat: ["else"],
+      logical: ["&&", "||"],
+    },
+  },
+  {
+    id: "rust",
+    label: "Rust",
+    extensions: [".rs"],
+    lineComment: C_LINE, // covers `//`, `///` and `//!` doc comments
+    blockComment: C_BLOCK,
+    // No `'` here: single quotes are handled via `lifetimeQuotes` so lifetimes
+    // (`'a`, `'static`) and loop labels (`'outer:`) aren't mistaken for strings.
+    strings: ['"'],
+    lifetimeQuotes: true,
+    block: "brace",
+    // fn name(  /  pub fn name(  /  async fn name<'a, T>(  /  const fn name(
+    signaturePatterns: [/\bfn\s+([A-Za-z_]\w*)\s*(?:<[^{(;]*>)?\s*\(/g],
+    // No ternary in Rust, and `?` is the try operator — never a decision.
+    // Each `match` arm (`=>`) is a branch, mirroring how `case` scores a switch.
+    decisionKeywords: ["if", "while", "for", "loop"],
+    decisionOperators: ["&&", "||", "=>"],
+    cognitive: {
+      // `match` counts once (like `switch`) and opens a nesting level.
+      nesting: ["if", "while", "for", "loop", "match"],
       flat: ["else"],
       logical: ["&&", "||"],
     },

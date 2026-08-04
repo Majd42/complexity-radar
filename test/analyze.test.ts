@@ -8,6 +8,7 @@ const ts = LANGUAGES.find((l) => l.id === "typescript")!;
 const js = LANGUAGES.find((l) => l.id === "javascript")!;
 const py = LANGUAGES.find((l) => l.id === "python")!;
 const go = LANGUAGES.find((l) => l.id === "go")!;
+const rs = LANGUAGES.find((l) => l.id === "rust")!;
 
 test("a straight-line function has complexity 1", () => {
   const src = `function add(a, b) { return a + b; }`;
@@ -185,4 +186,74 @@ test("python cognitive complexity tracks indentation nesting", () => {
 test("cognitiveOf scores a clean body directly with nesting weight", () => {
   // if at depth 0 (+1), while nested at depth 1 (+2) = 3.
   assert.equal(cognitiveOf("{ if (a) { while (b) {} } }", ts), 3);
+});
+
+test("rust functions and methods are detected, decisions counted", () => {
+  const src = `pub fn handle(w: i32) -> i32 {
+    if w > 0 && w < 10 {
+      return 1;
+    }
+    for _ in 0..w { }
+    0
+  }`;
+  const { functions } = analyzeSource(src, rs);
+  assert.equal(functions.length, 1);
+  assert.equal(functions[0]!.name, "handle");
+  assert.equal(functions[0]!.complexity, 4); // base + if + && + for
+  assert.equal(functions[0]!.params, 1);
+});
+
+test("rust lifetimes and labels are not mistaken for char literals", () => {
+  const src = `fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    'outer: loop {
+      if x.len() > y.len() { break 'outer; }
+    }
+    x
+  }`;
+  const { functions } = analyzeSource(src, rs);
+  assert.equal(functions.length, 1);
+  assert.equal(functions[0]!.name, "longest");
+  // base + loop + if = 3. The '&'a str' lifetimes must not swallow the body.
+  assert.equal(functions[0]!.complexity, 3);
+});
+
+test("rust match arms each count as a branch", () => {
+  const src = `fn classify(n: i32) -> u8 {
+    match n {
+      0 => 0,
+      1 => 1,
+      _ => 2,
+    }
+  }`;
+  const { functions } = analyzeSource(src, rs);
+  // base + three arms (=>) = 4; match itself is one cognitive increment.
+  assert.equal(functions[0]!.complexity, 4);
+  assert.equal(functions[0]!.cognitive, 1);
+});
+
+test("rust try operator is not scored as a ternary", () => {
+  const src = `fn read(path: &str) -> Result<String, Error> {
+    let s = fetch(path)?;
+    let t = parse(&s)?;
+    Ok(t)
+  }`;
+  const { functions } = analyzeSource(src, rs);
+  assert.equal(functions[0]!.complexity, 1); // `?` is the try operator, not a branch
+  assert.equal(functions[0]!.cognitive, 0);
+});
+
+test("rust char literals with braces don't break body extraction", () => {
+  const src = `fn count(s: &str) -> usize {
+    let open = '{';
+    let close = '}';
+    if s.contains(open) && s.contains(close) { 1 } else { 0 }
+  }`;
+  const { functions } = analyzeSource(src, rs);
+  assert.equal(functions.length, 1);
+  assert.equal(functions[0]!.name, "count");
+  assert.equal(functions[0]!.complexity, 3); // base + if + &&
+});
+
+test("rust extension resolves to the rust language", () => {
+  assert.equal(languageForExtension(".rs")?.id, "rust");
 });

@@ -45,6 +45,8 @@ function countOperators(body: string, ops: DecisionOperator[]): number {
   if (ops.includes("&&")) count += matchCount(body, /&&/g);
   if (ops.includes("||")) count += matchCount(body, /\|\|/g);
   if (ops.includes("??")) count += matchCount(body, /\?\?/g);
+  // Each `=>` is a `match` arm (Rust) — a branch, like a `case`.
+  if (ops.includes("=>")) count += matchCount(body, /=>/g);
   if (ops.includes("?")) {
     // Ternary `?` only: drop nullish `??` and optional-chaining `?.` first.
     const ternaryOnly = body.replace(/\?\?/g, "  ").replace(/\?\./g, "  ");
@@ -83,6 +85,9 @@ function isWordChar(c: string | undefined): boolean {
 function cognitiveBrace(body: string, lang: LanguageDef): number {
   const nestKw = lang.cognitive.nesting;
   const flatKw = lang.cognitive.flat;
+  // Only languages with a real ternary treat `?` as a conditional. In Rust `?`
+  // is the try operator and must not be charged as a branch.
+  const hasTernary = lang.decisionOperators.includes("?");
   let score = 0;
   let nesting = 0;
   let parenDepth = 0;
@@ -113,7 +118,7 @@ function cognitiveBrace(body: string, lang: LanguageDef): number {
     // `if (x) return;` doesn't wrongly nest an unrelated later block.
     if (c === ";" && parenDepth === 0) { pendingNest = false; i++; continue; }
 
-    if (c === "?") {
+    if (c === "?" && hasTernary) {
       const next = body[i + 1];
       if (next === "?" || next === "." || next === ":") { i += 2; continue; }
       // Ternary: a conditional, charged like a nested branch.
