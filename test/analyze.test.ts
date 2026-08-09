@@ -9,6 +9,7 @@ const js = LANGUAGES.find((l) => l.id === "javascript")!;
 const py = LANGUAGES.find((l) => l.id === "python")!;
 const go = LANGUAGES.find((l) => l.id === "go")!;
 const rs = LANGUAGES.find((l) => l.id === "rust")!;
+const rb = LANGUAGES.find((l) => l.id === "ruby")!;
 
 test("a straight-line function has complexity 1", () => {
   const src = `function add(a, b) { return a + b; }`;
@@ -256,4 +257,127 @@ test("rust char literals with braces don't break body extraction", () => {
 
 test("rust extension resolves to the rust language", () => {
   assert.equal(languageForExtension(".rs")?.id, "rust");
+});
+
+test("ruby def bodies are delimited by def/end, decisions counted", () => {
+  const src = [
+    "def handle(w)",
+    "  if w > 0 && w < 10",
+    "    return 1",
+    "  end",
+    "  0",
+    "end",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  assert.equal(functions.length, 1);
+  assert.equal(functions[0]!.name, "handle");
+  assert.equal(functions[0]!.complexity, 3); // base + if + &&
+  assert.equal(functions[0]!.params, 1);
+  assert.equal(functions[0]!.endLine, 6);
+});
+
+test("ruby trailing-modifier if is a decision but does not open a block", () => {
+  const src = [
+    "def clamp(x)",
+    "  return 0 if x < 0",
+    "  x",
+    "end",
+    "",
+    "def other",
+    "  1",
+    "end",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  // The modifier `if` must not swallow `other`; two methods, clamp ends at 4.
+  assert.equal(functions.length, 2);
+  const clamp = functions.find((f) => f.name === "clamp")!;
+  assert.equal(clamp.complexity, 2); // base + modifier if
+  assert.equal(clamp.endLine, 4);
+});
+
+test("ruby case/when scores each branch and do-blocks nest correctly", () => {
+  const src = [
+    "def sizes(items)",
+    "  items.each do |i|",
+    "    case i",
+    "    when 1 then :one",
+    "    when 2 then :two",
+    "    else :many",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  assert.equal(functions.length, 1);
+  assert.equal(functions[0]!.name, "sizes");
+  // base + two `when` = 3; the `each do` block must close before `end` of def.
+  assert.equal(functions[0]!.complexity, 3);
+  assert.equal(functions[0]!.endLine, 9);
+});
+
+test("ruby predicate/bang/setter method names are captured", () => {
+  const src = [
+    "def valid?(x)",
+    "  x > 0",
+    "end",
+    "def save!",
+    "  persist",
+    "end",
+    "def name=(v)",
+    "  @name = v",
+    "end",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  assert.deepEqual(functions.map((f) => f.name), ["valid?", "save!", "name="]);
+  assert.equal(functions.find((f) => f.name === "valid?")!.params, 1);
+});
+
+test("ruby endless method has no end and counts its expression", () => {
+  const src = [
+    "def big?(x) = x > 10 && x < 20",
+    "def square(n) = n * n",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  assert.equal(functions.length, 2);
+  const big = functions.find((f) => f.name === "big?")!;
+  assert.equal(big.params, 1);
+  assert.equal(big.complexity, 2); // base + &&
+  assert.equal(big.endLine, 1);
+  assert.equal(functions.find((f) => f.name === "square")!.complexity, 1);
+});
+
+test("ruby ? in predicate calls is not miscounted as a ternary", () => {
+  const src = [
+    "def check(a)",
+    "  a.empty? || a.nil?",
+    "end",
+  ].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  // Only the `||` is a decision; the `?` predicate suffixes must not count.
+  assert.equal(functions[0]!.complexity, 2);
+});
+
+test("ruby cognitive complexity penalises nesting via indentation", () => {
+  const src = [
+    "def f(x)",
+    "  if x",
+    "    while x > 0",
+    "      x -= 1",
+    "    end",
+    "  end",
+    "end",
+  ].join("\n");
+  // if(+1) + while(+1+1) = 3.
+  const { functions } = analyzeSource(src, rb);
+  assert.equal(functions[0]!.cognitive, 3);
+});
+
+test("ruby parenless params are counted", () => {
+  const src = ["def add a, b", "  a + b", "end"].join("\n");
+  const { functions } = analyzeSource(src, rb);
+  assert.equal(functions[0]!.params, 2);
+});
+
+test("ruby extension resolves to the ruby language", () => {
+  assert.equal(languageForExtension(".rb")?.id, "ruby");
 });

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ruby support** (`.rb`). Adds a third block style ("keyword") that matches a
+  method body from `def` to its balancing `end`, counting nested
+  `if`/`while`/`case`/`begin`/`do` openers against `end`s. Trailing modifiers
+  (`return x if y`) are scored as decisions without opening a block,
+  `case`/`when` scores per branch, parenless params (`def f a, b`) and one-line
+  "endless" methods (`def f(x) = …`) are handled, and `?` is not treated as a
+  ternary so predicate methods (`empty?`, `nil?`) aren't miscounted.
 - **Rust support** (`.rs`). Detects free functions and `impl`/trait methods,
   including generics and lifetimes. `match` arms are counted as branches, the
   `?` try operator is not treated as a decision, and lifetimes (`'a`) and loop

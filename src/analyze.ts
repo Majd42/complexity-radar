@@ -222,7 +222,9 @@ export function analyzeSource(
   const functions =
     lang.block === "brace"
       ? extractBraceFunctions(src, clean, lang, lines)
-      : extractIndentFunctions(src, clean, lang, lines);
+      : lang.block === "keyword"
+        ? extractKeywordFunctions(src, clean, lang, lines)
+        : extractIndentFunctions(src, clean, lang, lines);
   return { functions, loc };
 }
 
@@ -367,6 +369,125 @@ function extractIndentFunctions(
 
   results.sort((a, b) => a.line - b.line);
   return results;
+}
+
+/**
+ * Extract functions for keyword/`end`-delimited languages (Ruby).
+ *
+ * Unlike braces or indentation, a Ruby method body is closed by an `end` that
+ * balances the `def` — with every intervening `if`/`while`/`case`/`do`/… also
+ * claiming its own `end`. We bracket-match those openers against `end`s line by
+ * line. Params may be parenless (`def foo a, b`) and one-line "endless" methods
+ * (`def foo(x) = expr`) have no `end` at all; both are handled here.
+ */
+function extractKeywordFunctions(
+  src: string,
+  clean: string,
+  lang: LanguageDef,
+  lines: LineIndex,
+): FunctionMetric[] {
+  const openers = new Set(lang.blockOpeners ?? []);
+  const closer = lang.blockCloser ?? "end";
+  const cleanLines = clean.split("\n");
+  const srcLines = src.split("\n");
+  const results: FunctionMetric[] = [];
+
+  const pattern = lang.signaturePatterns[0];
+  if (!pattern) return results;
+  pattern.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(clean)) !== null) {
+    const name = match[1];
+    if (!name) continue;
+
+    // Locate the (optional) parameter list and where the signature body starts.
+    const afterName = match.index + match[0].length;
+    let params = 0;
+    let sigEnd = afterName;
+    const hasParens = clean[afterName] === "(";
+    if (hasParens) {
+      const close = matchBracket(clean, afterName);
+      if (close < 0) continue;
+      params = countParams(clean.slice(afterName + 1, close));
+      sigEnd = close + 1;
+    }
+
+    // "Endless" method: `def foo = expr` / `def foo(x) = expr` — a single bare
+    // `=` (not `==`, `=~`, `=>`) after the signature, and no `end`.
+    let k = sigEnd;
+    while (k < clean.length && (clean[k] === " " || clean[k] === "\t")) k++;
+    const isEndless =
+      clean[k] === "=" && !["=", "~", ">"].includes(clean[k + 1] ?? "");
+
+    if (isEndless) {
+      let eol = clean.indexOf("\n", k);
+      if (eol < 0) eol = clean.length;
+      const body = clean.slice(k + 1, eol);
+      const complexity = complexityOf(body, lang);
+      results.push({
+        name,
+        line: lines.lineAt(match.index),
+        endLine: lines.lineAt(Math.max(k, eol - 1)),
+        complexity,
+        cognitive: cognitiveOf(body, lang),
+        loc: countNonBlankLines(body),
+        maxNesting: 0,
+        params,
+        severity: severityFor(complexity),
+      });
+      continue;
+    }
+
+    // Parenless params run to the end of the signature line (`def foo a, b`).
+    if (!hasParens) {
+      let eol = clean.indexOf("\n", afterName);
+      if (eol < 0) eol = clean.length;
+      const paramText = clean.slice(afterName, eol);
+      params = paramText.trim() === "" ? 0 : countParams(paramText);
+    }
+
+    // Block body: scan lines until the `def`'s matching `end` closes it.
+    const startLine0 = lines.lineAt(sigEnd) - 1; // 0-based signature line
+    let depth = 1; // the `def` itself
+    let endLine0 = startLine0;
+    for (let l = startLine0 + 1; l < cleanLines.length; l++) {
+      depth += lineDepthDelta(cleanLines[l] ?? "", openers, closer);
+      endLine0 = l;
+      if (depth <= 0) break;
+    }
+
+    const bodyLines = cleanLines.slice(startLine0, endLine0 + 1);
+    const body = bodyLines.join("\n");
+    const complexity = complexityOf(body, lang);
+    results.push({
+      name,
+      line: lines.lineAt(match.index),
+      endLine: endLine0 + 1,
+      complexity,
+      cognitive: cognitiveOf(body, lang),
+      loc: countNonBlankLines(srcLines.slice(startLine0, endLine0 + 1).join("\n")),
+      maxNesting: indentNesting(bodyLines, indentOf(cleanLines[startLine0] ?? "")),
+      params,
+      severity: severityFor(complexity),
+    });
+  }
+
+  results.sort((a, b) => a.line - b.line);
+  return results;
+}
+
+/**
+ * Net change in block depth for one cleaned Ruby line: openers minus `end`s.
+ * A leading control keyword (`if`, `while`, `case`, `begin`, `def`, …) opens
+ * one block; otherwise each trailing `do` (`items.each do |x|`) opens one.
+ * Trailing modifiers (`return x if y`) never lead the line, so they don't nest.
+ */
+function lineDepthDelta(line: string, openers: Set<string>, closer: string): number {
+  const closes = (line.match(new RegExp(`\\b${escapeRegExp(closer)}\\b`, "g")) || []).length;
+  const lead = leadingWord(line);
+  const opens = openers.has(lead) ? 1 : (line.match(/\bdo\b/g) || []).length;
+  return opens - closes;
 }
 
 function indentOf(line: string): number {
