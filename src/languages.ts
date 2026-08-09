@@ -6,10 +6,12 @@
  * indentation-matching, then counts decision points. That keeps the tool a
  * single dependency-free package that works across many languages, at the cost
  * of the precision a real per-language AST would give you. JS/TS, Python and Go
- * detection is reliable; Java and C# extraction is best-effort.
+ * detection is reliable; Java, C# and Ruby extraction is best-effort. Ruby's
+ * `def`…`end` bodies use a third block style ("keyword") that brackets openers
+ * against `end`s line by line.
  */
 
-export type BlockStyle = "brace" | "indent";
+export type BlockStyle = "brace" | "indent" | "keyword";
 
 export interface LanguageDef {
   /** Stable id used in reports. */
@@ -32,6 +34,15 @@ export interface LanguageDef {
   lifetimeQuotes?: boolean;
   /** How function bodies are delimited. */
   block: BlockStyle;
+  /**
+   * For `block: "keyword"` languages (Ruby): keywords that, when they lead a
+   * line, open a block terminated by {@link blockCloser} (`def`, `if`, `while`,
+   * `case`, `begin`, …). A trailing `do` opens one too. Used to bracket-match a
+   * method body by counting openers against closers.
+   */
+  blockOpeners?: string[];
+  /** For `block: "keyword"` languages: the token that closes a block (`end`). */
+  blockCloser?: string;
   /**
    * Signature patterns. Each must capture the function name in group 1 and end
    * at the opening parenthesis of the parameter list (`\(`), so the analyzer can
@@ -232,6 +243,34 @@ export const LANGUAGES: LanguageDef[] = [
       nesting: ["if", "while", "for", "loop", "match"],
       flat: ["else"],
       logical: ["&&", "||"],
+    },
+  },
+  {
+    id: "ruby",
+    label: "Ruby",
+    extensions: [".rb"],
+    lineComment: ["#"],
+    // `=begin`/`=end` block comments are line-anchored and rare; like Python
+    // (docstrings) we skip them rather than risk matching a stray `=begin`.
+    blockComment: [],
+    strings: ['"', "'", "`"],
+    // Bodies run from `def` to the matching `end`, not by braces or indentation.
+    block: "keyword",
+    blockOpeners: ["def", "class", "module", "if", "unless", "while", "until", "for", "case", "begin"],
+    blockCloser: "end",
+    // `def name` / `def name(…)` / `def self.name` / `def Klass.name`. Method
+    // names may end in `?` (predicates), `!` (bang), or `=` (setters). Params
+    // are often parenless, so the keyword extractor resolves them itself.
+    signaturePatterns: [/\bdef\s+(?:self\.|[A-Z]\w*\.)?([A-Za-z_]\w*[?!=]?)/g],
+    // `?` is deliberately NOT a decision operator: predicate methods (`empty?`,
+    // `nil?`) and char literals (`?a`) would swamp any real ternary count.
+    // `case`/`when` is scored via each `when`, mirroring `switch`/`case`.
+    decisionKeywords: ["if", "elsif", "unless", "while", "until", "for", "when", "rescue", "and", "or"],
+    decisionOperators: ["&&", "||"],
+    cognitive: {
+      nesting: ["if", "unless", "while", "until", "for", "case"],
+      flat: ["elsif", "else"],
+      logical: ["&&", "||", "and", "or"],
     },
   },
 ];
