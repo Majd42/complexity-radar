@@ -1,4 +1,9 @@
-import type { ProjectReport, Severity } from "./types.js";
+import type {
+  DeltaSummary,
+  FunctionDelta,
+  ProjectReport,
+  Severity,
+} from "./types.js";
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   low: "Low",
@@ -11,9 +16,10 @@ const SEVERITY_LABEL: Record<Severity, string> = {
  * Render a {@link ProjectReport} as a GitHub-flavoured Markdown summary — the
  * format you paste into a pull request, issue, or CI comment. Includes the
  * headline metrics, severity distribution, the top hot spots, and (when churn
- * ran) the risk ranking.
+ * ran) the risk ranking. Pass a {@link DeltaSummary} to prepend a baseline
+ * comparison — ideal for a PR comment that shows what the change did.
  */
-export function renderMarkdown(report: ProjectReport): string {
+export function renderMarkdown(report: ProjectReport, delta?: DeltaSummary | null): string {
   const { summary } = report;
   const out: string[] = [];
 
@@ -21,6 +27,8 @@ export function renderMarkdown(report: ProjectReport): string {
   out.push("");
   out.push(`\`${report.root}\``);
   out.push("");
+
+  if (delta) renderDelta(out, delta);
 
   out.push(
     `| Files | Functions | LOC | Avg cx | Max cx | Avg cog | Max cog |`,
@@ -87,6 +95,71 @@ export function renderMarkdown(report: ProjectReport): string {
   );
 
   return out.join("\n") + "\n";
+}
+
+const STATUS_LABEL: Record<FunctionDelta["status"], string> = {
+  worsened: "⚠️ worse",
+  new: "🆕 new",
+  removed: "🗑️ removed",
+  improved: "✅ better",
+  same: "same",
+};
+
+/** Render the baseline-comparison section into `out`. */
+function renderDelta(out: string[], delta: DeltaSummary): void {
+  out.push(`## Baseline comparison`);
+  out.push("");
+  if (delta.baselineGeneratedAt) {
+    out.push(`Compared against baseline from ${delta.baselineGeneratedAt}.`, "");
+  }
+
+  const verdict = delta.regressions.length > 0 ? "⚠️" : "✅";
+  const net =
+    delta.totalComplexityDelta === 0
+      ? "no net change in total complexity"
+      : `net complexity ${signed(delta.totalComplexityDelta)}`;
+  out.push(
+    `${verdict} **${delta.regressions.length} regression(s)** · ${net} · ` +
+      `${delta.worsened} worse · ${delta.improved} better · ` +
+      `${delta.added} new · ${delta.removed} removed`,
+    "",
+  );
+
+  // Show regressions when present, otherwise the notable improvements/changes.
+  const rows = delta.regressions.length > 0 ? delta.regressions : delta.changes.slice(0, 10);
+  if (rows.length === 0) {
+    out.push("_No function-level changes._", "");
+    return;
+  }
+
+  out.push(
+    `| Change | Complexity | Cognitive | Function | File |`,
+    `| ------ | ---------: | --------: | -------- | ---- |`,
+  );
+  for (const d of rows) {
+    out.push(
+      `| ${STATUS_LABEL[d.status]} | ${cxCell(d)} | ${cogCell(d)} | ` +
+        `\`${escapeCell(d.name)}\` | ${escapeCell(d.relPath)}:${d.line} |`,
+    );
+  }
+  out.push("");
+}
+
+/** A "before → after (±delta)" cell for cyclomatic complexity. */
+function cxCell(d: FunctionDelta): string {
+  if (d.status === "new") return `${d.complexity} (new)`;
+  if (d.status === "removed") return `~~${d.baseComplexity}~~`;
+  return `${d.baseComplexity} → ${d.complexity} (${signed(d.complexityDelta)})`;
+}
+
+function cogCell(d: FunctionDelta): string {
+  if (d.status === "new") return String(d.cognitive);
+  if (d.status === "removed") return `~~${d.baseCognitive}~~`;
+  return `${d.baseCognitive} → ${d.cognitive}`;
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n);
 }
 
 /** Escape the characters that would break out of a Markdown table cell. */

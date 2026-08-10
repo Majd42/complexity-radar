@@ -75,6 +75,10 @@ complexity-radar . --ignore "**/*.test.ts,**/generated/**" --json report.json
 
 # Write a Markdown summary to drop into a pull request or CI comment
 complexity-radar src --markdown summary.md
+
+# Gate a PR on *regressions*: save a baseline on main, compare against it
+complexity-radar . --json baseline.json                 # on main
+complexity-radar . --baseline baseline.json --fail-on-regression   # on the PR
 ```
 
 ### Options
@@ -89,6 +93,8 @@ complexity-radar src --markdown summary.md
 | `-i, --ignore <glob>` | Extra ignore glob, repeatable or comma-separated |
 | `--since <when>` | Git date bounding the churn window (e.g. `"6 months ago"`, `2024-01-01`) |
 | `--no-churn` | Skip git churn analysis (the `complexity × churn` risk ranking) |
+| `-b, --baseline <file>` | Compare against an earlier `--json` report and show the per-function delta |
+| `--fail-on-regression` | Exit with code `1` if any function got more complex vs the baseline (CI gate) |
 | `-q, --quiet` | Only print the summary line |
 | `-h, --help` / `-v, --version` | Help / version |
 
@@ -114,6 +120,33 @@ Pass `--markdown <file>` to also emit a plain-text Markdown summary (headline
 metrics, severity, hot spots, and the risk ranking) — the format you paste
 straight into a pull request or CI comment. Combine it with `--threshold` to
 gate CI and post the results in one run.
+
+### Baseline comparison & regression gating
+
+An absolute `--threshold` is a blunt gate: on a legacy codebase it's either
+always red or set so high it never fires. What you usually want to block in a
+pull request is a **regression** — code that got *worse* — not the debt that was
+already there. That's what `--baseline` is for.
+
+Save a baseline from your main branch's `--json` output, then compare a branch
+against it:
+
+```bash
+# On main (e.g. a scheduled job or a push to main):
+complexity-radar . --json baseline.json
+
+# On a pull request:
+complexity-radar . --baseline baseline.json --markdown delta.md --fail-on-regression
+```
+
+Functions are matched across the two runs by file path and name (a function
+that merely moved down the file reads as unchanged), and each is classified as
+**worsened**, **improved**, **new**, or **removed**. `--fail-on-regression`
+exits `1` when any function's cyclomatic complexity rose — or, if you also pass
+`--threshold`, when a *new* function lands above it. The `--markdown` output
+gains a **Baseline comparison** section (`c8 → c12 (+4)` per function) that
+reads naturally as a PR comment. Pair it with the `--json` you already emit and
+one run both gates the merge and posts the diff.
 
 ### Severity bands
 
@@ -146,6 +179,26 @@ for (const hot of report.summary.churn?.hotspots ?? []) {
 }
 
 writeFileSync("report.html", renderHtml(report));
+```
+
+`diffReports(current, baseline)` compares two reports and returns the
+per-function delta (worsened / improved / new / removed) plus the list of
+regressions — the same data behind `--baseline` and `--fail-on-regression`:
+
+```ts
+import { analyzeProject, diffReports } from "complexity-radar";
+import { readFileSync } from "node:fs";
+
+const baseline = JSON.parse(readFileSync("baseline.json", "utf8"));
+const current = analyzeProject(["src"], process.cwd());
+const delta = diffReports(current, baseline, { threshold: 15 });
+
+if (delta.regressions.length > 0) {
+  for (const r of delta.regressions) {
+    console.log(`${r.relPath}:${r.line} ${r.name}  ${r.baseComplexity}→${r.complexity}`);
+  }
+  process.exitCode = 1;
+}
 ```
 
 ## How it works (and its limits)

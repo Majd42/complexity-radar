@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { analyzeProject } from "./index.js";
 import { renderHtml } from "./report.js";
 import { renderMarkdown } from "./markdown.js";
-import type { ProjectReport, Severity } from "./types.js";
+import { diffReports } from "./delta.js";
+import type { DeltaSummary, ProjectReport, Severity } from "./types.js";
 
 interface CliOptions {
   paths: string[];
@@ -18,6 +19,8 @@ interface CliOptions {
   quiet: boolean;
   churn: boolean;
   since: string | null;
+  baseline: string | null;
+  failOnRegression: boolean;
 }
 
 const HELP = `complexity-radar — cyclomatic complexity & tech-debt dashboard
@@ -37,6 +40,8 @@ Options:
   -i, --ignore <glob>   Extra ignore glob (repeatable, comma-separated)
       --since <when>    Git date bounding the churn window (e.g. "6 months ago")
       --no-churn        Skip git churn analysis (complexity × change frequency)
+  -b, --baseline <file> Compare against an earlier --json report and show the delta
+      --fail-on-regression  Exit 1 if any function got more complex vs the baseline
   -q, --quiet           Only print the summary line
   -h, --help            Show this help
   -v, --version         Show version
@@ -47,6 +52,8 @@ Examples:
   complexity-radar . --threshold 15 --ignore "**/*.test.ts,**/generated/**"
   complexity-radar . --since "6 months ago"      # recent-churn risk ranking
   complexity-radar src -m summary.md             # Markdown for a PR comment
+  complexity-radar . --json base.json            # on main: save a baseline
+  complexity-radar . -b base.json --fail-on-regression   # on a PR: gate on it
 `;
 
 function parseArgs(argv: string[]): CliOptions | { help: true } | { version: true } {
@@ -61,6 +68,8 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
     quiet: false,
     churn: true,
     since: null,
+    baseline: null,
+    failOnRegression: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -83,6 +92,8 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
         break;
       case "--since": opts.since = next(); break;
       case "--no-churn": opts.churn = false; break;
+      case "-b": case "--baseline": opts.baseline = next(); break;
+      case "--fail-on-regression": opts.failOnRegression = true; break;
       case "-q": case "--quiet": opts.quiet = true; break;
       default:
         if (arg.startsWith("-")) fail(`Unknown option: ${arg}`);
@@ -140,24 +151,50 @@ function main(): void {
     since: opts.since,
   });
 
+  const delta = opts.baseline ? diffAgainstBaseline(report, opts) : null;
+
   const outPath = resolve(process.cwd(), opts.output);
   writeFileSync(outPath, renderHtml(report), "utf8");
   if (opts.json) {
     writeFileSync(resolve(process.cwd(), opts.json), JSON.stringify(report, null, 2), "utf8");
   }
   if (opts.markdown) {
-    writeFileSync(resolve(process.cwd(), opts.markdown), renderMarkdown(report), "utf8");
+    writeFileSync(resolve(process.cwd(), opts.markdown), renderMarkdown(report, delta), "utf8");
   }
 
   if (!opts.quiet) printSummary(report, started);
+  if (!opts.quiet && delta) printDelta(delta);
   process.stdout.write(`Report written to ${outPath}\n`);
 
+  let failed = false;
   if (opts.threshold !== null && report.summary.overThreshold > 0) {
     process.stderr.write(
       `\n${report.summary.overThreshold} function(s) exceed the complexity threshold of ${opts.threshold}.\n`,
     );
-    process.exit(1);
+    failed = true;
   }
+  if (opts.failOnRegression && delta && delta.regressions.length > 0) {
+    process.stderr.write(
+      `\n${delta.regressions.length} function(s) regressed against the baseline.\n`,
+    );
+    failed = true;
+  }
+  if (failed) process.exit(1);
+}
+
+/** Load the baseline JSON report and diff the current report against it. */
+function diffAgainstBaseline(report: ProjectReport, opts: CliOptions): DeltaSummary {
+  const path = resolve(process.cwd(), opts.baseline!);
+  let baseline: ProjectReport;
+  try {
+    baseline = JSON.parse(readFileSync(path, "utf8")) as ProjectReport;
+  } catch (err) {
+    fail(`could not read baseline "${opts.baseline}": ${(err as Error).message}`);
+  }
+  if (!Array.isArray(baseline.files)) {
+    fail(`baseline "${opts.baseline}" is not a complexity-radar JSON report (no "files" array)`);
+  }
+  return diffReports(report, baseline, { threshold: opts.threshold });
 }
 
 function printSummary(report: ProjectReport, started: number): void {
@@ -200,6 +237,37 @@ function printSummary(report: ProjectReport, started: number): void {
   out.write("\n");
 }
 
+function printDelta(delta: DeltaSummary): void {
+  const out = process.stdout;
+  const net = delta.totalComplexityDelta;
+  const netStr = net > 0 ? red(`+${net}`) : net < 0 ? green(String(net)) : "0";
+
+  out.write(`\n  Baseline comparison`);
+  out.write(delta.baselineGeneratedAt ? dim(` (${delta.baselineGeneratedAt})`) : "");
+  out.write(`\n`);
+  out.write(
+    `    Δ total complexity ${netStr} · ` +
+    `${red(String(delta.worsened))} worse · ${green(String(delta.improved))} better · ` +
+    `${delta.added} new · ${delta.removed} removed\n`,
+  );
+
+  if (delta.regressions.length > 0) {
+    out.write(`\n  ${red(`Regressions (${delta.regressions.length}):`)}\n`);
+    for (const d of delta.regressions.slice(0, 10)) {
+      const change = d.status === "new"
+        ? `new c${d.complexity}`
+        : `c${d.baseComplexity}→${d.complexity}`;
+      out.write(
+        `    ${red(`+${d.complexityDelta}`.padStart(4))}  ` +
+        `${dim(change.padEnd(12))}  ${d.relPath}:${d.line} ${dim(d.name)}\n`,
+      );
+    }
+  } else {
+    out.write(`    ${green("No regressions.")}\n`);
+  }
+  out.write("\n");
+}
+
 const COLORS: Record<Severity, string> = {
   low: "\x1b[32m",
   moderate: "\x1b[33m",
@@ -214,6 +282,12 @@ function paint(sev: Severity, value: string | number): string {
 }
 function dim(value: string): string {
   return useColor ? `\x1b[2m${value}${RESET}` : value;
+}
+function red(value: string): string {
+  return useColor ? `\x1b[31m${value}${RESET}` : value;
+}
+function green(value: string): string {
+  return useColor ? `\x1b[32m${value}${RESET}` : value;
 }
 function fmt(n: number): string {
   return n.toLocaleString("en-US");

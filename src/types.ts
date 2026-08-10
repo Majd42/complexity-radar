@@ -124,6 +124,63 @@ export interface ProjectReport {
   };
 }
 
+/**
+ * How one function changed relative to a baseline report.
+ *
+ * - `new` — present now, absent in the baseline.
+ * - `removed` — present in the baseline, gone now.
+ * - `worsened` — matched a baseline function; cyclomatic complexity went up.
+ * - `improved` — matched a baseline function; cyclomatic complexity went down.
+ * - `same` — matched a baseline function; cyclomatic complexity unchanged.
+ */
+export type DeltaStatus = "new" | "removed" | "worsened" | "improved" | "same";
+
+/** A single function's change relative to a baseline report. */
+export interface FunctionDelta {
+  name: string;
+  relPath: string;
+  language: string;
+  /** Current line (baseline line for a `removed` function). */
+  line: number;
+  status: DeltaStatus;
+  /** Current cyclomatic complexity (0 when `removed`). */
+  complexity: number;
+  /** Baseline cyclomatic complexity (0 when `new`). */
+  baseComplexity: number;
+  /** `complexity - baseComplexity`. */
+  complexityDelta: number;
+  /** Current cognitive complexity (0 when `removed`). */
+  cognitive: number;
+  /** Baseline cognitive complexity (0 when `new`). */
+  baseCognitive: number;
+  /** `cognitive - baseCognitive`. */
+  cognitiveDelta: number;
+}
+
+/** The result of diffing a report against a baseline. */
+export interface DeltaSummary {
+  /** `generatedAt` of the baseline report, or `null` when unavailable. */
+  baselineGeneratedAt: string | null;
+  /** Net change in summed cyclomatic complexity across all functions. */
+  totalComplexityDelta: number;
+  /** Count of matched functions whose complexity rose. */
+  worsened: number;
+  /** Count of matched functions whose complexity fell. */
+  improved: number;
+  /** Count of functions new since the baseline. */
+  added: number;
+  /** Count of functions removed since the baseline. */
+  removed: number;
+  /**
+   * Functions that count as regressions under the gate policy: any function
+   * whose complexity rose, plus new functions above the threshold (when one is
+   * set). Highest complexity increase first.
+   */
+  regressions: FunctionDelta[];
+  /** Every function whose status is not `same`, largest increase first. */
+  changes: FunctionDelta[];
+}
+
 /** Options accepted by {@link analyzeProject}. */
 export interface AnalyzeOptions {
   /** Extra ignore globs (in addition to the sensible defaults). */
