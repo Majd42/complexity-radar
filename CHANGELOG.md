@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Baseline comparison & regression gating** via `--baseline <file>` and
+  `--fail-on-regression`. Compares the current run against an earlier `--json`
+  report, matching functions by file path and name (a function that only moved
+  reads as unchanged) and classifying each as worsened, improved, new, or
+  removed. `--fail-on-regression` exits `1` when any function's complexity rose
+  (or a new function lands above `--threshold`), so a PR can gate on *getting
+  worse* rather than on absolute debt. The CLI summary and `--markdown` output
+  gain a baseline-comparison section. Exposed programmatically as
+  `diffReports(current, baseline)`.
 - **Ruby support** (`.rb`). Adds a third block style ("keyword") that matches a
   method body from `def` to its balancing `end`, counting nested
   `if`/`while`/`case`/`begin`/`do` openers against `end`s. Trailing modifiers
