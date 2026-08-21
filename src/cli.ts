@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeProject } from "./index.js";
 import { renderHtml } from "./report.js";
 import { renderMarkdown } from "./markdown.js";
 import { diffReports } from "./delta.js";
+import { type LoadedConfig, loadConfig } from "./config.js";
 import type { DeltaSummary, ProjectReport, Severity } from "./types.js";
 
+/** Fully-resolved options after merging defaults, config file, and CLI flags. */
 interface CliOptions {
   paths: string[];
   output: string;
@@ -21,6 +23,28 @@ interface CliOptions {
   since: string | null;
   baseline: string | null;
   failOnRegression: boolean;
+}
+
+/**
+ * Only the flags the user actually passed. Kept separate from {@link CliOptions}
+ * so a config file can supply anything the command line left unset — an omitted
+ * flag is `undefined` here, not a default that would clobber the config.
+ */
+interface CliArgs {
+  paths: string[];
+  output?: string;
+  json?: string;
+  markdown?: string;
+  threshold?: number;
+  top?: number;
+  ignore: string[];
+  quiet?: boolean;
+  churn?: boolean; // set to `false` only by --no-churn
+  since?: string;
+  baseline?: string;
+  failOnRegression?: boolean;
+  config?: string;
+  noConfig?: boolean;
 }
 
 const HELP = `complexity-radar — cyclomatic complexity & tech-debt dashboard
@@ -42,9 +66,17 @@ Options:
       --no-churn        Skip git churn analysis (complexity × change frequency)
   -b, --baseline <file> Compare against an earlier --json report and show the delta
       --fail-on-regression  Exit 1 if any function got more complex vs the baseline
+  -c, --config <file>   Load settings from a config file (default: auto-discover)
+      --no-config       Ignore any config file and use defaults + flags only
   -q, --quiet           Only print the summary line
   -h, --help            Show this help
   -v, --version         Show version
+
+Config file:
+  Settings can live in complexity-radar.json (or .complexity-radar.json, or a
+  "complexity-radar" key in package.json), discovered by walking up from the
+  current directory. Every flag above has a matching field. Command-line flags
+  win over the file; --ignore globs from both are combined.
 
 Examples:
   complexity-radar
@@ -54,23 +86,11 @@ Examples:
   complexity-radar src -m summary.md             # Markdown for a PR comment
   complexity-radar . --json base.json            # on main: save a baseline
   complexity-radar . -b base.json --fail-on-regression   # on a PR: gate on it
+  complexity-radar --config .complexity-radar.json       # explicit config file
 `;
 
-function parseArgs(argv: string[]): CliOptions | { help: true } | { version: true } {
-  const opts: CliOptions = {
-    paths: [],
-    output: "complexity-report.html",
-    json: null,
-    markdown: null,
-    threshold: null,
-    top: 25,
-    ignore: [],
-    quiet: false,
-    churn: true,
-    since: null,
-    baseline: null,
-    failOnRegression: false,
-  };
+function parseArgs(argv: string[]): CliArgs | { help: true } | { version: true } {
+  const args: CliArgs = { paths: [], ignore: [] };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -82,27 +102,62 @@ function parseArgs(argv: string[]): CliOptions | { help: true } | { version: tru
     switch (arg) {
       case "-h": case "--help": return { help: true };
       case "-v": case "--version": return { version: true };
-      case "-o": case "--output": opts.output = next(); break;
-      case "-j": case "--json": opts.json = next(); break;
-      case "-m": case "--markdown": opts.markdown = next(); break;
-      case "-t": case "--threshold": opts.threshold = parseIntOrFail(next(), arg); break;
-      case "--top": opts.top = parseIntOrFail(next(), arg); break;
+      case "-o": case "--output": args.output = next(); break;
+      case "-j": case "--json": args.json = next(); break;
+      case "-m": case "--markdown": args.markdown = next(); break;
+      case "-t": case "--threshold": args.threshold = parseIntOrFail(next(), arg); break;
+      case "--top": args.top = parseIntOrFail(next(), arg); break;
       case "-i": case "--ignore":
-        opts.ignore.push(...next().split(",").map((s) => s.trim()).filter(Boolean));
+        args.ignore.push(...next().split(",").map((s) => s.trim()).filter(Boolean));
         break;
-      case "--since": opts.since = next(); break;
-      case "--no-churn": opts.churn = false; break;
-      case "-b": case "--baseline": opts.baseline = next(); break;
-      case "--fail-on-regression": opts.failOnRegression = true; break;
-      case "-q": case "--quiet": opts.quiet = true; break;
+      case "--since": args.since = next(); break;
+      case "--no-churn": args.churn = false; break;
+      case "-b": case "--baseline": args.baseline = next(); break;
+      case "--fail-on-regression": args.failOnRegression = true; break;
+      case "-c": case "--config": args.config = next(); break;
+      case "--no-config": args.noConfig = true; break;
+      case "-q": case "--quiet": args.quiet = true; break;
       default:
         if (arg.startsWith("-")) fail(`Unknown option: ${arg}`);
-        opts.paths.push(arg);
+        args.paths.push(arg);
     }
   }
 
-  if (opts.paths.length === 0) opts.paths.push(".");
-  return opts;
+  return args;
+}
+
+/**
+ * Merge defaults, the config file, and CLI flags into the final options.
+ * Precedence: a CLI flag beats the config file, which beats the built-in
+ * default. `ignore` is the exception — config globs and CLI globs are combined.
+ * Path-like values taken from the config are resolved against the config file's
+ * directory so they hold no matter which sub-directory the tool runs from.
+ */
+function resolveOptions(args: CliArgs, loaded: LoadedConfig | null): CliOptions {
+  const c = loaded?.config ?? {};
+  const dir = loaded?.dir ?? process.cwd();
+  // Resolve a config-supplied path against the config's own directory.
+  const cfgPath = (v: string | null | undefined): string | null =>
+    v == null ? null : resolve(dir, v);
+
+  const cliPaths = args.paths.length ? args.paths : null;
+  const cfgPaths = c.paths && c.paths.length ? c.paths.map((p) => resolve(dir, p)) : null;
+
+  return {
+    paths: cliPaths ?? cfgPaths ?? ["."],
+    output: args.output ?? cfgPath(c.output) ?? "complexity-report.html",
+    json: args.json ?? cfgPath(c.json),
+    markdown: args.markdown ?? cfgPath(c.markdown),
+    threshold: args.threshold ?? c.threshold ?? null,
+    top: args.top ?? c.top ?? 25,
+    // Ignore globs are additive: everything the config lists plus the CLI's.
+    ignore: [...(c.ignore ?? []), ...args.ignore],
+    quiet: args.quiet ?? c.quiet ?? false,
+    churn: args.churn ?? c.churn ?? true,
+    since: args.since ?? c.since ?? null,
+    baseline: args.baseline ?? cfgPath(c.baseline),
+    failOnRegression: args.failOnRegression ?? c.failOnRegression ?? false,
+  };
 }
 
 function parseIntOrFail(value: string, flag: string): number {
@@ -141,7 +196,19 @@ function main(): void {
     return;
   }
 
-  const opts = parsed;
+  let loaded: LoadedConfig | null = null;
+  if (!parsed.noConfig) {
+    try {
+      loaded = loadConfig(process.cwd(), parsed.config);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  }
+
+  const opts = resolveOptions(parsed, loaded);
+  if (loaded && !opts.quiet) {
+    process.stdout.write(`Using config ${relative(process.cwd(), loaded.path) || loaded.path}\n`);
+  }
   const started = Date.now();
   const report = analyzeProject(opts.paths, process.cwd(), {
     ignore: opts.ignore,

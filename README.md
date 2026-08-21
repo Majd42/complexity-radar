@@ -79,6 +79,9 @@ complexity-radar src --markdown summary.md
 # Gate a PR on *regressions*: save a baseline on main, compare against it
 complexity-radar . --json baseline.json                 # on main
 complexity-radar . --baseline baseline.json --fail-on-regression   # on the PR
+
+# Commit your settings once in complexity-radar.json, then just run:
+complexity-radar
 ```
 
 ### Options
@@ -95,11 +98,41 @@ complexity-radar . --baseline baseline.json --fail-on-regression   # on the PR
 | `--no-churn` | Skip git churn analysis (the `complexity × churn` risk ranking) |
 | `-b, --baseline <file>` | Compare against an earlier `--json` report and show the per-function delta |
 | `--fail-on-regression` | Exit with code `1` if any function got more complex vs the baseline (CI gate) |
+| `-c, --config <file>` | Load settings from a config file (default: auto-discover, see below) |
+| `--no-config` | Ignore any config file; use built-in defaults plus flags only |
 | `-q, --quiet` | Only print the summary line |
 | `-h, --help` / `-v, --version` | Help / version |
 
 Build directories (`node_modules`, `dist`, `target`, `__pycache__`, …),
 dot-directories, oversized files, and minified files are skipped automatically.
+
+### Configuration file
+
+Rather than repeating flags in every CI job, commit them once. Complexity Radar
+looks for a **`complexity-radar.json`** (or `.complexity-radar.json`, or a
+`"complexity-radar"` key in `package.json`), discovered by walking up from the
+current directory — so it works from any sub-folder of the repo. Every flag has
+a matching field:
+
+```json
+{
+  "paths": ["src", "lib"],
+  "ignore": ["**/*.test.ts", "**/generated/**"],
+  "threshold": 15,
+  "top": 40,
+  "since": "6 months ago",
+  "output": "reports/complexity.html"
+}
+```
+
+**Command-line flags win over the file**, so a committed config sets the team
+default and any run can still override it (`complexity-radar --top 10`). The one
+exception is `--ignore`: CLI globs are *added* to the config's rather than
+replacing them. Path-like values (`paths`, `output`, `json`, `markdown`,
+`baseline`) resolve relative to the config file's own directory. Pass
+`--no-config` to ignore any file and run on defaults, or `--config <file>` to
+point at an explicit one. A `$schema` key is allowed (for editor autocomplete)
+and unknown keys warn but don't fail.
 
 ## The report
 

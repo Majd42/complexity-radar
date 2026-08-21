@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Configuration file support.** Settings can now be committed once in a
+  `complexity-radar.json` (or `.complexity-radar.json`, or a `"complexity-radar"`
+  key in `package.json`) instead of repeated as CLI flags in every CI job. The
+  file is auto-discovered by walking up from the working directory, so it applies
+  from any sub-folder. Every flag has a matching field; command-line flags take
+  precedence over the file, except `--ignore` globs, which are combined. Path
+  values resolve relative to the config file's directory. New flags `--config
+  <file>` (load an explicit file) and `--no-config` (ignore any file). A leading
+  BOM and a `$schema` key are tolerated; unknown keys warn but don't fail.
+  Exposed programmatically as `loadConfig` / `validateConfig`.
 - **Baseline comparison & regression gating** via `--baseline <file>` and
   `--fail-on-regression`. Compares the current run against an earlier `--json`
   report, matching functions by file path and name (a function that only moved

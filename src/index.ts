@@ -20,6 +20,8 @@ export { diffReports } from "./delta.js";
 export type { DiffOptions } from "./delta.js";
 export { LANGUAGES } from "./languages.js";
 export { collectChurn, isGitRepo } from "./git.js";
+export { loadConfig, validateConfig, CONFIG_FILENAMES } from "./config.js";
+export type { FileConfig, LoadedConfig } from "./config.js";
 
 /**
  * Analyse one or more paths and produce a complete {@link ProjectReport}.
